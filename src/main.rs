@@ -10,6 +10,8 @@ use ratatui::{
 struct Life {
     w: i64,
     h: i64,
+    x: i64,
+    y: i64,
     cells: Vec<bool>,
 }
 
@@ -20,6 +22,8 @@ impl Life {
         Life {
             h,
             w,
+            x: 0,
+            y: 0,
             cells: vec![false; (w * h) as usize],
         }
     }
@@ -52,20 +56,31 @@ impl Life {
         new
     }
 
-    fn draw(&self, frame: &mut Frame) {
+    fn draw(&self, frame: &mut Frame, cursor: &Cursor) {
         assert!(frame.area().x == 0);
         assert!(frame.area().y == 0);
         let buffer = frame.buffer_mut();
         for x in 0..self.w {
+            // Being so cavalier will come back to haunt us, I'm sure
+            let rx = x - self.x;
             for y in 0..self.h {
-                if self[(x, y)] {
+                let ry = y - self.y;
+                let style = if x == cursor.x && y == cursor.y {
+                    Style::default().fg(Color::Red).bg(Color::White)
+                } else {
+                    Style::default().fg(Color::Red)
+                };
+                if self[(rx, ry)] {
                     buffer
                         .get_mut(x as u16, y as u16)
                         .set_symbol("o")
-                        .set_style(Style::default().fg(Color::Red));
+                        .set_style(style)
                 } else {
-                    buffer.get_mut(x as u16, y as u16).set_symbol(" ");
-                }
+                    buffer
+                        .get_mut(x as u16, y as u16)
+                        .set_symbol(" ")
+                        .set_style(style)
+                };
             }
         }
     }
@@ -87,6 +102,12 @@ impl std::ops::IndexMut<(i64, i64)> for Life {
     }
 }
 
+#[derive(Copy, Clone, PartialEq, Eq)]
+struct Cursor {
+    x: i64,
+    y: i64,
+}
+
 fn main() -> Result<(), std::io::Error> {
     let mut terminal = ratatui::init();
     let size = terminal.size()?;
@@ -98,22 +119,37 @@ fn main() -> Result<(), std::io::Error> {
     life[(2, 1)] = true;
 
     let mut paused = false;
+    let mut cursor = Cursor { x: 0, y: 0 };
+
+    let mut delay = 400;
 
     loop {
-        terminal.draw(|f| life.draw(f))?;
-        if !event::poll(Duration::from_millis(10))? {
-            if !paused {
-                life = life.step();
-            }
+        terminal.draw(|f| life.draw(f, &cursor))?;
+        if !paused {
+            life = life.step();
+        }
+        if !event::poll(Duration::from_millis(delay))? {
             continue;
         }
         match event::read()? {
             Event::Key(k) if k.code == KeyCode::Esc => break,
-            Event::Key(k) if k.code == KeyCode::Char(' ') => {
-                paused = !paused
+            Event::Key(k) if k.code == KeyCode::Char(' ') => paused = !paused,
+            Event::Key(k) if k.code == KeyCode::Char('h') => cursor.x -= 1,
+            Event::Key(k) if k.code == KeyCode::Char('l') => cursor.x += 1,
+            Event::Key(k) if k.code == KeyCode::Char('j') => cursor.y += 1,
+            Event::Key(k) if k.code == KeyCode::Char('k') => cursor.y -= 1,
+            Event::Key(k) if k.code == KeyCode::Char('f') => {
+                life[(cursor.x, cursor.y)] = !life[(cursor.x, cursor.y)]
             },
+            Event::Key(k) if k.code == KeyCode::Char('+') => if delay > 100 {
+                delay -= 100
+            }
+            Event::Key(k) if k.code == KeyCode::Char('-') => delay += 100,
             _ => (),
         }
+
+        cursor.x = cursor.x.rem_euclid(life.w);
+        cursor.y = cursor.y.rem_euclid(life.h);
     }
     ratatui::restore();
     Ok(())
